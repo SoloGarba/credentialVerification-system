@@ -5,19 +5,22 @@
  *   1. Pin a JSON file with circuit inputs + credential metadata → get zkDataCID
  *   2. Pin the PDF with only zkDataCID in keyvalues (4 keyvalues total, no length issues)
  *   3. Store PDF CID on-chain via addCredential()
- *
- * Students fetch circuit inputs via:
- *   PDF CID → keyvalues.zkDataCID → fetch JSON from IPFS gateway
+ *   4. Admin can email the student their CID via EmailJS
  */
 
 import { ethers } from 'ethers';
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import emailjs from '@emailjs/browser';
 import { useWalletContext } from '../../context/WalletContext';
 import { useContractContext } from '../../context/ContractContext';
 import { poseidonHash4, hashToBytes32 } from '../../utils/crypto/poseidon';
 import LoadingSpinner from '../Common/LoadingSpinner';
 import '../../styles/admin.css';
+
+const EMAILJS_SERVICE_ID  = 'service_8li8675';
+const EMAILJS_TEMPLATE_ID = 'template_9lxrghz';
+const EMAILJS_PUBLIC_KEY  = 'Nz8t1CnUWkboWNVt8';
 
 const stringToBigInt = (str) => {
   const hash = ethers.keccak256(ethers.toUtf8Bytes(str));
@@ -42,6 +45,12 @@ const IssueCredential = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+
+  // Email state
+  const [studentEmail, setStudentEmail] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -75,7 +84,6 @@ const IssueCredential = () => {
     setSelectedFile(file);
   };
 
-  /** Pin the circuit inputs + metadata as a JSON file. Returns its CID. */
   const pinCircuitDataJSON = async (JWT) => {
     const payload = {
       student: circuitInputs.student,
@@ -112,9 +120,8 @@ const IssueCredential = () => {
     return (await res.json()).IpfsHash;
   };
 
-  /** Pin the PDF with zkDataCID as a keyvalue reference. Returns PDF CID. */
   const pinPDF = async (JWT, zkDataCID) => {
-     console.log('[pinPDF] zkDataCID:', zkDataCID);
+    console.log('[pinPDF] zkDataCID:', zkDataCID);
     const fd = new FormData();
     fd.append('file', selectedFile);
     fd.append('pinataMetadata', JSON.stringify({
@@ -171,11 +178,12 @@ const IssueCredential = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!credentialHash || !ipfsCID) { alert('Please generate hash and provide IPFS CID'); return; }
+    if (!ipfsCID) { alert('Please upload to IPFS first'); return; }
+    if (!credentialHash) { alert('Please generate the credential hash first'); return; }
 
     try {
       const result = await addCredential(credentialHash, ipfsCID);
-      if (result && result.success) {
+      if (result) {
         const existing = JSON.parse(localStorage.getItem('issuedCredentials') || '[]');
         existing.push({
           hash: credentialHash, ipfsCID,
@@ -194,9 +202,43 @@ const IssueCredential = () => {
     }
   };
 
+  const handleSendEmail = async () => {
+    if (!studentEmail) { setEmailError('Please enter the student\'s email address'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(studentEmail)) { setEmailError('Please enter a valid email address'); return; }
+
+    setEmailSending(true);
+    setEmailError('');
+
+    try {
+      await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+          student_name:      formData.studentName,
+          student_email:     studentEmail,
+          degree:            formData.degree,
+          institution:       formData.institution,
+          cid:               ipfsCID,
+          credential_hash:   credentialHash,
+          app_url:           window.location.origin,
+          institution_name:  formData.institution,
+        },
+        EMAILJS_PUBLIC_KEY
+      );
+      setEmailSent(true);
+    } catch (err) {
+      console.error('EmailJS error:', err);
+      setEmailError('Failed to send email. Please try again or share the CID manually.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   const handleReset = () => {
     setFormData({ studentName: '', studentId: '', degree: '', institution: '', graduationDate: '', gpa: '' });
-    setIpfsCID(''); setCredentialHash(''); setCircuitInputs(null); setStep(1); setSuccess(false);
+    setIpfsCID(''); setCredentialHash(''); setCircuitInputs(null);
+    setStep(1); setSuccess(false);
+    setStudentEmail(''); setEmailSent(false); setEmailError('');
   };
 
   if (loading) return <LoadingSpinner message="Processing transaction..." />;
@@ -208,17 +250,51 @@ const IssueCredential = () => {
           <div className="success-icon">✅</div>
           <h2>Credential Issued Successfully!</h2>
           <p>The credential has been added to the blockchain.</p>
+
           <div className="success-details">
             <div className="detail-item"><label>Transaction Hash:</label><code>{txHash}</code></div>
             <div className="detail-item"><label>Credential Hash:</label><code>{credentialHash}</code></div>
             <div className="detail-item"><label>IPFS CID:</label><code>{ipfsCID}</code></div>
           </div>
-          <div className="info-box" style={{ marginTop: '1rem' }}>
-            <strong>📤 Share with Student:</strong>
-            <p>Give the student their <strong>IPFS CID</strong>: <code>{ipfsCID}</code><br />
-            They use it to generate their ZK proof — no other data needed.</p>
+
+          {/* ── Email Section ── */}
+          <div className="info-box" style={{ marginTop: '1.5rem' }}>
+            <strong>📧 Notify Student by Email</strong>
+            <p style={{ marginBottom: '0.75rem' }}>
+              Send {formData.studentName} their IPFS CID so they can access and verify their credential.
+            </p>
+
+            {emailSent ? (
+              <div className="alert alert-success" style={{ marginTop: '0.5rem' }}>
+                ✅ Email sent successfully to {studentEmail}!
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <input
+                  type="email"
+                  value={studentEmail}
+                  onChange={(e) => { setStudentEmail(e.target.value); setEmailError(''); }}
+                  placeholder="student@example.com"
+                  style={{ flex: 1, minWidth: '200px', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '0.9rem' }}
+                  disabled={emailSending}
+                />
+                <button
+                  onClick={handleSendEmail}
+                  disabled={emailSending}
+                  className="btn btn-primary"
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {emailSending ? '⏳ Sending...' : '📤 Send Email'}
+                </button>
+              </div>
+            )}
+
+            {emailError && (
+              <p style={{ color: '#dc2626', fontSize: '0.85rem', marginTop: '0.4rem' }}>{emailError}</p>
+            )}
           </div>
-          <div className="success-actions">
+
+          <div className="success-actions" style={{ marginTop: '1.5rem' }}>
             <button onClick={handleReset} className="btn btn-primary">Issue Another Credential</button>
             <button onClick={() => navigate('/admin')} className="btn btn-secondary">Back to Dashboard</button>
           </div>
