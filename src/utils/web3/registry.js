@@ -38,6 +38,18 @@ export const updateMerkleRoot = async (newRoot, signer) => {
   }
 };
 
+
+export const revokeCredential = async (credentialHash, signer) => {
+  try {
+    const contract = getRegistryContract(signer);
+    const tx = await contract.revokeCredential(credentialHash);
+    const receipt = await tx.wait();
+    return { success: true, transactionHash: receipt.hash, blockNumber: receipt.blockNumber, gasUsed: receipt.gasUsed.toString(), credentialHash };
+  } catch (error) {
+    throw new Error(`Failed to revoke credential: ${error.message}`);
+  }
+};
+
 export const updateZKVerifier = async (verifierAddress, signer) => {
   try {
     const contract = getRegistryContract(signer);
