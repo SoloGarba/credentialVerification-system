@@ -59,6 +59,17 @@ export const useContract = () => {
     finally { setLoading(false); }
   }, [signer]);
 
+  const revokeCredential = useCallback(async (credentialHash) => {
+    if (!signer) { setError('Wallet not connected'); return null; }
+    setLoading(true); setError(null); setTxHash(null);
+    try {
+      const result = await registryUtils.revokeCredential(credentialHash, signer);
+      setTxHash(result.transactionHash);
+      return result;
+    } catch (err) { setError(err.message); return null; }
+    finally { setLoading(false); }
+  }, [signer]);
+
   const verifyStandard = useCallback(async (credentialHash, ipfsCID) => {
     if (!signer) { setError('Wallet not connected'); return null; }
     setLoading(true); setError(null); setTxHash(null);
@@ -166,6 +177,7 @@ export const useContract = () => {
     txHash,
     addCredential,
     updateMerkleRoot,
+    revokeCredential,
     verifyStandard,
     verifyWithZKProof,
     checkCredentialExists,
