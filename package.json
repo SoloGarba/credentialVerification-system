@@ -5,6 +5,7 @@
   "dependencies": {
     "@craco/craco": "^7.1.0",
     "ajv": "^8.17.1",
+    "assert": "^2.1.0",
     "axios": "^1.6.2",
     "buffer": "^6.0.3",
     "circomlibjs": "^0.1.7",
